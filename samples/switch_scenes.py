@@ -10,7 +10,7 @@ import typer
 logging.basicConfig(level=logging.INFO)
 
 sys.path.append('../')
-from obswebsocket import open_obs_websocket, requests  # noqa: E402
+from obswebsocket_trio import open_obs_websocket, requests  # noqa: E402
 
 
 async def main(host: str = 'localhost', port: int = 4444, password: str = 'secret'):

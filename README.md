@@ -1,21 +1,28 @@
+![PyPI - License](https://img.shields.io/pypi/l/obs-websocket-py-trio)
+![PyPI](https://img.shields.io/pypi/v/obs-websocket-py-trio)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/obs-websocket-py-trio)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/mkdryden/obs-websocket-py-trio)
+
 # obs-websocket-py
 Python library to communicate with an [obs-websocket](https://github.com/Palakis/obs-websocket) server.
+This is a fork of [obs-websocket-py](https://github.com/Elektordi/obs-websocket-py) using the trio async library.
 
 _Licensed under the MIT License_
 
 ## Project pages
 
-GitHub project: https://github.com/Elektordi/obs-websocket-py
+GitHub project: https://github.com/mkdryden/obs-websocket-py-trio
 
-PyPI package: https://pypi.org/project/obs-websocket-py/
+PyPI package: https://pypi.org/project/obs-websocket-py-trio/
 
 ## Installation
 
-Just run `pip install obs-websocket-py` in your Python venv or directly on your system.
+Just run `pip install obs-websocket-py-trio` in your Python venv or directly on your system.
 
-For manual install, git clone the github repo and copy the directory **obswebsocket** in your python project root.
+For development, `poetry install` from the source directory will generate a venv with all the dependencies
 
-**Requires**: websocket-client (from pip)
+For manual install, git clone the github repo and copy the directory **obswebsocket-trio** in your python project root.
+
 
 ## Usage
 
@@ -34,8 +41,8 @@ obswebsocket.core.ObsWS = class ObsWS(trio.abc.AsyncResource)
  |  Core class for using obs-websocket-py
  |
  |  Simple usage:
- |      >>> import obswebsocket, obswebsocket.requests as obsrequests
- |      >>> async with obswebsocket.open_obs_websocket("localhost", 4444, "secret") as client:
+ |      >>> import obswebsocket_trio, obswebsocket_trio.requests as obsrequests
+ |      >>> async with obswebsocket_trio.open_obs_websocket("localhost", 4444, "secret") as client:
  |      >>>     await client.call(obsrequests.GetVersion()).getObsWebsocketVersion()
  |      '4.1.0'
  |
@@ -156,8 +163,4 @@ obswebsocket.core.ObsWS = class ObsWS(trio.abc.AsyncResource)
  |
  |  async __aexit__(self, *args)
 ```
-
-## Problems?
-
-Please check on [Github project issues](https://github.com/Elektordi/obs-websocket-py/issues), and if nobody else have experienced it before, you can [file a new issue](https://github.com/Elektordi/obs-websocket-py/issues/new).
 

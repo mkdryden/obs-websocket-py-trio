@@ -23,7 +23,7 @@ class ObsWS(trio.abc.AsyncResource):
     Core class for using obs-websocket-py
 
     Simple usage:
-        >>> import obswebsocket, obswebsocket.requests as obsrequests
+        >>> import obswebsocket_trio, obswebsocket_trio.requests as obsrequests
         >>> async with obswebsocket.open_obs_websocket("localhost", 4444, "secret") as client:
         >>>     await client.call(obsrequests.GetVersion()).getObsWebsocketVersion()
         '4.1.0'

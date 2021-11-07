@@ -10,7 +10,7 @@ import typer
 logging.basicConfig(level=logging.INFO)
 
 sys.path.append('../')
-from obswebsocket import open_obs_websocket, events  # noqa: E402
+from obswebsocket_trio import open_obs_websocket, events  # noqa: E402
 
 
 def on_event(message):
