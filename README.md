@@ -17,16 +17,37 @@ PyPI package: https://pypi.org/project/obs-websocket-py-trio/
 
 ## Installation
 
-Just run `pip install obs-websocket-py-trio` in your Python venv or directly on your system.
+Just run `pip install obswebsocket-trio` in your Python venv or directly on your system.
 
 For development, `poetry install` from the source directory will generate a venv with all the dependencies
 
-For manual install, git clone the github repo and copy the directory **obswebsocket-trio** in your python project root.
+For manual install, git clone the github repo and copy the directory **obswebsocket_trio** in your python project root.
 
 
 ## Usage
 
-See python scripts in the [samples](https://github.com/Elektordi/obs-websocket-py/tree/master/samples) directory.
+See python scripts in the [samples](https://github.com/mkdryden/obs-websocket-py-trio/tree/master/samples) directory.
+
+The big change from the original obs-websocket-py is the use of the trio async library.
+This means that most methods of `ObsWS` must be called with `await` from inside a trio event loop.
+A new convenience function `open_obs_websocket` acts as an asynchronous context manager yielding an `ObsWs` instance,
+automatically connecting and starting a trio `Nursery` to manage the background tasks required for the websocket
+connection and to handle events from OBS.
+
+
+A simple example to print the names of all scenes:
+```python
+from obswebsocket_trio import open_obs_websocket, requests
+import trio
+
+async def main(host: str = 'localhost', port: int = 4444, password: str = 'secret'):
+    async with open_obs_websocket(host, port, password) as ws:
+        scenes = await ws.call(requests.GetSceneList())
+        for scene in scenes.getScenes():
+            print(scene['name'])
+
+trio.run(main)
+```
 
 Or take a look at the documentation below:
 

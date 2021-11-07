@@ -9,7 +9,7 @@ include = ["samples/*", "CHANGELOG.rst"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.7"
 single-source = "^0.2.0"
 trio = "^0.19.0"
 trio-websocket = "^0.9.2"
