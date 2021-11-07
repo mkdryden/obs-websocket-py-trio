@@ -1,6 +1,6 @@
-![PyPI - License](https://img.shields.io/pypi/l/obs-websocket-py-trio)
-![PyPI](https://img.shields.io/pypi/v/obs-websocket-py-trio)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/obs-websocket-py-trio)
+![PyPI - License](https://img.shields.io/pypi/l/obswebsocket_trio)
+![PyPI](https://img.shields.io/pypi/v/obswebsocket_trio)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/obswebsocket_trio)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/mkdryden/obs-websocket-py-trio)
 
 # obs-websocket-py

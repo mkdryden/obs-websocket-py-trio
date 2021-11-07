@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "obswebsocket-trio"
-version = "0.1.1"
+version = "0.1.1post2"
 description = "Python library to communicate with an obs-websocket server, trio async version. Fork of obs-websocket-py<https://github.com/Elektordi/obs-websocket-py>"
 authors = ["Michael D. M. Dryden <mk.dryden@utoronto.ca>"]
 repository = "https://github.com/mkdryden/obs-websocket-py-trio"
