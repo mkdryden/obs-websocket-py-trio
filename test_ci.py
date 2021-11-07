@@ -1,4 +1,5 @@
-from obswebsocket import obsws, requests, events
+from obswebsocket import ObsWS, requests, events
+from trio import open_nursery
 
 host = "127.0.0.1"
 port = 4444
@@ -6,7 +7,8 @@ password = "secret"
 
 
 def test_load():
-    _ = obsws(host, port, password)
+    with open_nursery() as n:
+        _ = ObsWS(n, host, port, password)
     # Just test everything is ok with the object...
 
 

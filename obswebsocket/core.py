@@ -5,10 +5,11 @@ import base64
 import hashlib
 import json
 import logging
-import socket
-import threading
-import time
-import websocket
+from contextlib import asynccontextmanager
+from typing import Union
+
+import trio
+import trio_websocket as tws
 
 from . import exceptions
 from . import base_classes
@@ -17,101 +18,116 @@ from . import events
 LOG = logging.getLogger(__name__)
 
 
-class obsws:
+class ObsWS(trio.abc.AsyncResource):
     """
     Core class for using obs-websocket-py
 
     Simple usage:
         >>> import obswebsocket, obswebsocket.requests as obsrequests
-        >>> client = obswebsocket.obsws("localhost", 4444, "secret")
-        >>> client.connect()
-        >>> client.call(obsrequests.GetVersion()).getObsWebsocketVersion()
-        u'4.1.0'
-        >>> client.disconnect()
+        >>> async with obswebsocket.open_obs_websocket("localhost", 4444, "secret") as client:
+        >>>     await client.call(obsrequests.GetVersion()).getObsWebsocketVersion()
+        '4.1.0'
 
     For advanced usage, including events callback, see the 'samples' directory.
     """
 
-    def __init__(self, host='localhost', port=4444, password=''):
+    def __init__(self, nursery: trio.Nursery, host='localhost', port=4444, password=''):
         """
         Construct a new obsws wrapper
 
+        :param nursery: A trio Nursery to run background tasks
         :param host: Hostname to connect to
         :param port: TCP Port to connect to (Default is 4444)
         :param password: Password for the websocket server (Leave this field
             empty if no auth enabled on the server)
         """
         self.id = 1
-        self.thread_recv = None
-        self.ws = None
+        self.ws: Union[None, tws.WebSocketConnection] = None
         self.eventmanager = EventManager()
         self.answers = {}
+        self._nursery = nursery
+        self.closed: bool = True
 
         self.host = host
         self.port = port
         self.password = password
 
-    def connect(self, host=None, port=None):
+    async def connect(self, autoreconnect: bool = True):
         """
         Connect to the websocket server
+        :param autoreconnect: If True, tries to reconnect every 2 seconds if disconnected.
 
         :return: Nothing
         """
-        if host is not None:
-            self.host = host
-        if port is not None:
-            self.port = port
+        if not self.closed:
+            return
 
-        try:
-            self.ws = websocket.WebSocket()
-            LOG.info("Connecting...")
-            self.ws.connect("ws://{}:{}".format(self.host, self.port))
-            LOG.info("Connected!")
-            self._auth(self.password)
-            self._run_threads()
-        except socket.error as e:
-            raise exceptions.ConnectionFailure(str(e))
+        while True:
+            try:
+                LOG.info('Connecting...')
+                self.ws = await tws.connect_websocket(self._nursery, self.host, self.port, '/', use_ssl=False,
+                                                      message_queue_size=20)
+                LOG.info('Connected!')
+                self.closed = False
+                await self._auth(self.password)
+            except (tws.HandshakeError, OSError) as e:
+                if not autoreconnect:
+                    raise exceptions.ConnectionFailure(str(e))
+                LOG.info('Could not connect, retrying...')
+                await trio.sleep(2)
+            else:
+                break
 
-    def reconnect(self):
+        self._nursery.start_soon(self._handle_messages)
+        if autoreconnect:
+            self._nursery.start_soon(self._auto_reconnect)
+
+    async def _auto_reconnect(self):
+        while True:
+            try:
+                if self.ws.closed:
+                    await self.reconnect()
+            except AttributeError:
+                await self.connect(False)  # Prevent infinite recursion
+            await trio.sleep(2)
+
+    async def reconnect(self):
         """
         Restart the connection to the websocket server
 
         :return: Nothing
         """
-        try:
-            self.disconnect()
-        except Exception:
-            # TODO: Need to catch more precise exception
-            pass
-        self.connect()
+        await self.disconnect()
+        await self.connect()
 
-    def disconnect(self):
+    async def disconnect(self):
         """
         Disconnect from websocket server
 
         :return: Nothing
         """
-        LOG.info("Disconnecting...")
-        if self.thread_recv is not None:
-            self.thread_recv.running = False
-
+        LOG.info('Disconnecting...')
         try:
-            self.ws.close()
-        except socket.error:
+            await self.ws.aclose()
+        except AttributeError:
             pass
+        self.closed = True
 
-        if self.thread_recv is not None:
-            self.thread_recv.join()
-            self.thread_recv = None
+    async def aclose(self):
+        self._nursery.cancel_scope.cancel()
+        await self.disconnect()
 
-    def _auth(self, password):
+    async def _auth(self, password):
+        if self.closed:
+            raise trio.ClosedResourceError()
+
         auth_payload = {
-            "request-type": "GetAuthRequired",
-            "message-id": str(self.id),
+            'request-type': 'GetAuthRequired',
+            'message-id': str(self.id),
         }
         self.id += 1
-        self.ws.send(json.dumps(auth_payload))
-        result = json.loads(self.ws.recv())
+        await self.ws.send_message(json.dumps(auth_payload))
+        result = json.loads(await self.ws.get_message())
 
         if result['status'] != 'ok':
             raise exceptions.ConnectionFailure(result['error'])
@@ -134,20 +150,12 @@ class obsws:
                 "auth": auth,
             }
             self.id += 1
-            self.ws.send(json.dumps(auth_payload))
-            result = json.loads(self.ws.recv())
+            await self.ws.send_message(json.dumps(auth_payload))
+            result = json.loads(await self.ws.get_message())
             if result['status'] != 'ok':
                 raise exceptions.ConnectionFailure(result['error'])
-        pass
 
-    def _run_threads(self):
-        if self.thread_recv is not None:
-            self.thread_recv.running = False
-        self.thread_recv = RecvThread(self)
-        self.thread_recv.daemon = True
-        self.thread_recv.start()
-
-    def call(self, obj):
+    async def call(self, obj) -> base_classes.Baserequests:
         """
         Make a call to the OBS server through the Websocket.
 
@@ -155,15 +163,17 @@ class obsws:
             to the server.
         :return: Request object populated with response data.
         """
+        if self.closed:
+            raise trio.ClosedResourceError()
+
         if not isinstance(obj, base_classes.Baserequests):
-            raise exceptions.ObjectError(
-                "Call parameter is not a request object")
+            raise exceptions.ObjectError('Call parameter is not a request object')
         payload = obj.data()
-        r = self.send(payload)
+        r = await self.send(payload)
         obj.input(r)
         return obj
 
-    def send(self, data):
+    async def send(self, data: dict) -> dict:
         """
         Make a raw json call to the OBS server through the Websocket.
 
@@ -171,21 +181,63 @@ class obsws:
             include field "message-id".
         :return: Response (python dict) from the server.
         """
+        if self.closed:
+            raise trio.ClosedResourceError()
+
         message_id = str(self.id)
         self.id += 1
-        data["message-id"] = message_id
-        LOG.debug(u"Sending message id {}: {}".format(message_id, data))
-        self.ws.send(json.dumps(data))
-        return self._wait_message(message_id)
+        data['message-id'] = message_id
+        LOG.debug('Sending message id %s: %s', message_id, data)
+        await self.ws.send_message(json.dumps(data))
 
-    def _wait_message(self, message_id):
-        timeout = time.time() + 60  # Timeout = 60s
-        while time.time() < timeout:
+        try:
+            with trio.fail_after(60):
+                return await self._wait_message(message_id)
+        except trio.TooSlowError:
+            raise exceptions.MessageTimeout(f'No answer for message {message_id}')
+
+    async def _wait_message(self, message_id):
+        while True:
             if message_id in self.answers:
                 return self.answers.pop(message_id)
-            time.sleep(0.1)
-        raise exceptions.MessageTimeout(u"No answer for message {}".format(
-            message_id))
+            await trio.sleep(0.1)
+
+    async def _handle_messages(self):
+        if self.closed:
+            raise trio.ClosedResourceError()
+        while True:
+            message = ""
+            try:
+                message = await self.ws.get_message()
+
+                if not message:
+                    continue
+
+                result = json.loads(message)
+                if 'update-type' in result:
+                    LOG.debug('Got message: %s', result)
+                    obj = self.build_event(result)
+                    self.eventmanager.trigger(obj)
+                elif 'message-id' in result:
+                    LOG.debug('Got answer for id %s: %s',
+                              result['message-id'], result)
+                    self.answers[result['message-id']] = result
+                else:
+                    LOG.warning('Unknown message: %s', result)
+            except tws.ConnectionClosed:
+                await self.reconnect()
+            except (ValueError, exceptions.ObjectError) as e:
+                LOG.warning('Invalid message: %s (%s)', message, e)
+
+    @staticmethod
+    def build_event(data):
+        name = data['update-type']
+        try:
+            obj = getattr(events, name)()
+        except AttributeError:
+            raise exceptions.ObjectError(f'Invalid event {name}')
+        obj.input(data)
+        return obj
 
     def register(self, func, event=None):
         """
@@ -211,59 +263,16 @@ class obsws:
         self.eventmanager.unregister(func, event)
 
 
-class RecvThread(threading.Thread):
-
-    def __init__(self, core):
-        self.core = core
-        self.ws = core.ws
-        self.running = True
-        threading.Thread.__init__(self)
-
-    def run(self):
-        while self.running:
-            message = ""
-            try:
-                message = self.ws.recv()
-
-                # recv() can return an empty string (Issue #6)
-                if not message:
-                    continue
-
-                result = json.loads(message)
-                if 'update-type' in result:
-                    LOG.debug(u"Got message: {}".format(result))
-                    obj = self.build_event(result)
-                    self.core.eventmanager.trigger(obj)
-                elif 'message-id' in result:
-                    LOG.debug(u"Got answer for id {}: {}".format(
-                        result['message-id'], result))
-                    self.core.answers[result['message-id']] = result
-                else:
-                    LOG.warning(u"Unknown message: {}".format(result))
-            except websocket.WebSocketConnectionClosedException:
-                if self.running:
-                    self.core.reconnect()
-            except OSError as e:
-                if self.running:
-                    raise e
-            except (ValueError, exceptions.ObjectError) as e:
-                LOG.warning(u"Invalid message: {} ({})".format(message, e))
-        # end while
-        LOG.debug("RecvThread ended.")
-
-    @staticmethod
-    def build_event(data):
-        name = data["update-type"]
-        try:
-            obj = getattr(events, name)()
-        except AttributeError:
-            raise exceptions.ObjectError(u"Invalid event {}".format(name))
-        obj.input(data)
-        return obj
+@asynccontextmanager
+async def open_obs_websocket(host: str = 'localhost', port: int = 4444, password: str = '',
+                             autoreconnect: bool = True) -> ObsWS:
+    async with trio.open_nursery() as nursery:
+        async with ObsWS(nursery, host, port, password) as ws:
+            await ws.connect(autoreconnect)
+            yield ws
 
 
-class EventManager:
-
+class EventManager(object):
     def __init__(self):
         self.functions = []
 
